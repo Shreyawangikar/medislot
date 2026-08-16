@@ -1,0 +1,5 @@
+source_id,name,address,city,state,pincode,latitude,longitude,phone,email,specializations
+GOV-MH-PUN-001,District General Civil Hospital Pune,Sangamvadi Railway Station Road,Pune,Maharashtra,411001,18.5204,73.8567,+91 (020) 2612-2400,dgh.pune@maharashtra.gov.in,General Medicine;General Surgery;Pediatrics;Obstetrics
+GOV-MH-PUN-002,Sub-District Civil Hospital Baner,Baner Main Road Near Highway,Pune,Maharashtra,411045,18.5596,73.7799,+91 (020) 2720-3344,civil.baner@maharashtra.gov.in,General Medicine;Trauma Care;Casualty
+GOV-MH-PUN-003,Regional Tertiary Health Center Hadapsar,Magarpatta Road Hadapsar,Pune,Maharashtra,411028,18.5089,73.9260,+91 (020) 2687-1100,rthc.hadapsar@maharashtra.gov.in,General Medicine;Pediatrics;Orthopedics
+GOV-MH-PUN-004,Community Health Center Kothrud,Paud Road Near Bus Stand,Pune,Maharashtra,411038,18.5074,73.8077,+91 (020) 2544-1234,chc.kothrud@maharashtra.gov.in,General Medicine;Vaccination Center
