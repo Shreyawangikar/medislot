@@ -2,24 +2,31 @@
 
 import React, { useState, useMemo, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Search, Building2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Search, Building2, AlertCircle, RefreshCw, MapPin } from 'lucide-react';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
-import { SectionHeading } from '@/components/ui/SectionHeading';
 import { LocationSelector } from '@/components/hospitals/LocationSelector';
 import { RadiusSelector } from '@/components/hospitals/RadiusSelector';
 import { HospitalFilters } from '@/components/hospitals/HospitalFilters';
 import { HospitalCard } from '@/components/hospitals/HospitalCard';
 import { mockHospitals } from '@/data/mockHospitals';
-import { HospitalFilterOptions } from '@/types/hospital';
+import { HospitalFilterOptions, Hospital } from '@/types/hospital';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 function HospitalsContent() {
   const searchParams = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
   const initialLocation = searchParams.get('location') || '';
 
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>({
+    lat: 18.5074,
+    lng: 73.8077,
+  });
+
+  const [apiHospitals, setApiHospitals] = useState<Hospital[] | null>(null);
 
   const [filters, setFilters] = useState<HospitalFilterOptions>({
     searchQuery: initialQuery,
@@ -31,31 +38,82 @@ function HospitalsContent() {
     sortBy: 'distance',
   });
 
+  // Fetch real spatial search results from Backend API when coords or radius changes
   useEffect(() => {
-    // Simulate initial loading state
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, []);
+    if (!coords) return;
+    setIsLoading(true);
+
+    const params = new URLSearchParams({
+      lat: coords.lat.toString(),
+      lng: coords.lng.toString(),
+      radius: filters.radiusKm.toString(),
+      hospitalType: filters.hospitalType,
+    });
+    if (filters.specialization) params.append('specialization', filters.specialization);
+    if (filters.searchQuery) params.append('q', filters.searchQuery);
+
+    fetch(`${API_BASE_URL}/api/hospitals/nearby?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.hospitals && Array.isArray(data.hospitals)) {
+          setApiHospitals(data.hospitals);
+        } else {
+          setApiHospitals(null);
+        }
+      })
+      .catch(() => {
+        // Fallback to local dataset if backend service is offline
+        setApiHospitals(null);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, [coords, filters.radiusKm, filters.hospitalType, filters.specialization, filters.searchQuery]);
 
   const handleFilterChange = (newFilters: Partial<HospitalFilterOptions>) => {
     setFilters((prev) => ({ ...prev, ...newFilters }));
   };
 
+  // REAL Browser Geolocation API
   const handleUseCurrentLocation = () => {
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      alert('Browser geolocation is not supported on this device.');
+      return;
+    }
+
     setIsLocating(true);
-    setTimeout(() => {
-      setIsLocating(false);
-      setFilters((prev) => ({
-        ...prev,
-        locationQuery: 'Current Location (Kothrud, Pune)',
-      }));
-    }, 600);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        setCoords({ lat, lng });
+        setIsLocating(false);
+        setFilters((prev) => ({
+          ...prev,
+          locationQuery: `Current Location (${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E)`,
+        }));
+      },
+      (error) => {
+        setIsLocating(false);
+        let errorMsg = 'Could not access position.';
+        if (error.code === error.PERMISSION_DENIED) {
+          errorMsg = 'Location permission denied. Please allow location access or select manual location.';
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          errorMsg = 'Current location is unavailable.';
+        } else if (error.code === error.TIMEOUT) {
+          errorMsg = 'Location request timed out.';
+        }
+        alert(errorMsg);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
+  // Filtered Hospital Results Computation
+  const activeDataset: Hospital[] = apiHospitals || mockHospitals;
+
   const filteredHospitals = useMemo(() => {
-    return mockHospitals
+    return activeDataset
       .filter((h) => {
         // Radius filter
         if (h.distanceKm > filters.radiusKm) return false;
@@ -64,13 +122,22 @@ function HospitalsContent() {
         if (filters.hospitalType === 'registered' && !h.registered) return false;
         if (filters.hospitalType === 'external' && h.registered) return false;
 
-        // Search Query filter (name, specializations, address)
+        // Functional Search Query Filter (Matches Name, Address, City, Specializations, and Doctors)
         if (filters.searchQuery.trim()) {
           const q = filters.searchQuery.toLowerCase();
           const matchName = h.name.toLowerCase().includes(q);
           const matchAddress = h.address.toLowerCase().includes(q) || h.city.toLowerCase().includes(q);
+          const matchPincode = h.pincode ? h.pincode.includes(q) : false;
           const matchSpec = h.specializations.some((s) => s.toLowerCase().includes(q));
-          if (!matchName && !matchAddress && !matchSpec) return false;
+
+          // Doctor name match if doctors array is attached
+          const matchDoctor = (h as any).doctors?.some((doc: any) =>
+            doc.name?.toLowerCase().includes(q) || doc.specialization?.toLowerCase().includes(q)
+          );
+
+          if (!matchName && !matchAddress && !matchPincode && !matchSpec && !matchDoctor) {
+            return false;
+          }
         }
 
         // Specialization filter
@@ -89,7 +156,7 @@ function HospitalsContent() {
         if (filters.sortBy === 'name') return a.name.localeCompare(b.name);
         return 0;
       });
-  }, [filters]);
+  }, [activeDataset, filters]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
@@ -107,16 +174,24 @@ function HospitalsContent() {
           Discover registered MediSlot centers and government directory hospitals within your target search area.
         </p>
 
-        {/* Global Keyword Search Input */}
+        {/* REAL Functional Search Input Bar */}
         <div className="relative max-w-2xl pt-2">
           <Search className="absolute left-4 top-5 w-5 h-5 text-slate-400" />
           <input
             type="text"
-            placeholder="Filter hospitals by name, doctor specialty, or landmark..."
+            placeholder="Search hospitals by name, doctor name, specialization, or area..."
             value={filters.searchQuery}
             onChange={(e) => handleFilterChange({ searchQuery: e.target.value })}
-            className="w-full bg-white text-slate-900 rounded-2xl pl-12 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 shadow-md"
+            className="w-full bg-white text-slate-900 rounded-2xl pl-12 pr-10 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 shadow-md font-medium placeholder:text-slate-400"
           />
+          {filters.searchQuery && (
+            <button
+              onClick={() => handleFilterChange({ searchQuery: '' })}
+              className="absolute right-4 top-4.5 text-xs text-slate-400 hover:text-slate-600 font-bold bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg"
+            >
+              Clear
+            </button>
+          )}
         </div>
       </div>
 
@@ -170,7 +245,7 @@ function HospitalsContent() {
           {isLoading ? (
             <div className="py-20 bg-white rounded-3xl border border-slate-200 text-center space-y-3">
               <RefreshCw className="w-8 h-8 text-teal-600 animate-spin mx-auto" />
-              <p className="text-sm font-semibold text-slate-700">Loading nearby medical centers...</p>
+              <p className="text-sm font-semibold text-slate-700">Searching nearby medical centers...</p>
             </div>
           ) : filteredHospitals.length === 0 ? (
             /* Empty State */
@@ -181,7 +256,9 @@ function HospitalsContent() {
               <div className="space-y-1">
                 <h3 className="text-lg font-bold text-slate-900">No Hospitals Found</h3>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  No medical centers matched your search query or radius filter ({filters.radiusKm} km). Try expanding your radius or resetting active filters.
+                  {filters.searchQuery
+                    ? `No medical centers matched "${filters.searchQuery}". Try clearing search keywords.`
+                    : `No medical centers matched your search query or radius filter (${filters.radiusKm} km). Try expanding your radius or resetting active filters.`}
                 </p>
               </div>
               <button
@@ -198,7 +275,7 @@ function HospitalsContent() {
                 }
                 className="px-4 py-2 rounded-xl bg-teal-50 text-teal-700 text-xs font-semibold hover:bg-teal-100 transition-colors"
               >
-                Expand Radius to 25 km
+                Reset Filters & Expand Radius to 25 km
               </button>
             </div>
           ) : (

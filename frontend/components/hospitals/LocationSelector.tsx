@@ -63,7 +63,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
             <span>{isLocating ? 'Detecting Coordinates...' : 'Use My Current Location'}</span>
           </Button>
           <p className="text-xs text-slate-500 font-medium">
-            Active position: <span className="text-teal-700 font-bold">{locationValue || 'Kothrud, Pune (18.5074° N, 73.8077° E)'}</span>
+            Active position: <span className="text-teal-700 font-bold">{locationValue || 'Detecting browser coordinates...'}</span>
           </p>
         </div>
       ) : (
