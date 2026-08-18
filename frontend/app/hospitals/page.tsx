@@ -9,7 +9,6 @@ import { LocationSelector } from '@/components/hospitals/LocationSelector';
 import { RadiusSelector } from '@/components/hospitals/RadiusSelector';
 import { HospitalFilters } from '@/components/hospitals/HospitalFilters';
 import { HospitalCard } from '@/components/hospitals/HospitalCard';
-import { mockHospitals } from '@/data/mockHospitals';
 import { HospitalFilterOptions, Hospital } from '@/types/hospital';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
@@ -51,7 +50,7 @@ function HospitalsContent() {
     lng: 73.8446,
   });
 
-  const [apiHospitals, setApiHospitals] = useState<Hospital[]>(mockHospitals);
+  const [apiHospitals, setApiHospitals] = useState<Hospital[]>([]);
 
   const [filters, setFilters] = useState<HospitalFilterOptions>({
     searchQuery: initialQuery,
@@ -66,7 +65,49 @@ function HospitalsContent() {
   const currentLat = coords.lat;
   const currentLng = coords.lng;
 
-  // Interconnected Location & Spatial Search Engine
+  const normalizeHospital = (item: any): Hospital => {
+    const name = item.name || 'Hospital';
+    const specializations = Array.isArray(item.specializations)
+      ? item.specializations
+      : typeof item.specialization === 'string'
+        ? [item.specialization]
+        : ['General Medicine'];
+
+    const registered = Boolean(item.registered);
+
+    return {
+      id: String(item.id || `${name}-${item.city || 'hospital'}`),
+      name,
+      address: item.address || 'Address not available',
+      city: item.city || 'Pune',
+      state: item.state || 'Maharashtra',
+      pincode: item.pincode || '411001',
+      phone: item.phone || '+91 00000 00000',
+      email: item.email || undefined,
+      description:
+        item.description ||
+        `${name} provides ${specializations.slice(0, 2).join(', ') || 'general medical care'} services in ${item.city || 'Pune'}.`,
+      image:
+        item.image ||
+        'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&w=900&q=80',
+      distanceKm: Number(item.distanceKm ?? 0),
+      registered,
+      bookingAvailable: Boolean(item.bookingAvailable ?? registered),
+      specializations,
+      rating: item.rating ?? (registered ? 4.6 : 4.2),
+      reviewCount: item.reviewCount ?? 0,
+      source: item.source,
+      ...(registered
+        ? {
+          doctors: Array.isArray(item.doctors) ? item.doctors : [],
+          departments: Array.isArray(item.departments) ? item.departments : [],
+        }
+        : {
+          source: item.source || 'Government Hospital Directory',
+        }),
+    } as Hospital;
+  };
+
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
@@ -77,53 +118,31 @@ function HospitalsContent() {
       radius: filters.radiusKm.toString(),
       hospitalType: filters.hospitalType,
     });
+
     if (filters.specialization) params.append('specialization', filters.specialization);
     if (filters.searchQuery) params.append('q', filters.searchQuery);
 
     fetch(`${API_BASE_URL}/api/hospitals/nearby?${params.toString()}`)
-      .then((res) => res.json())
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `Request failed with status ${res.status}`);
+        }
+        return res.json();
+      })
       .then((data) => {
         if (!isMounted) return;
-        if (data && data.hospitals && Array.isArray(data.hospitals) && data.hospitals.length > 0) {
-          setApiHospitals(data.hospitals);
-        } else {
-          // Calculate exact distances from active coordinates
-          const calculated = mockHospitals.map((h) => {
-            let hLat = 18.5074;
-            let hLng = 73.8077;
-            if (h.name.toLowerCase().includes('sancheti') || h.pincode === '411005') {
-              hLat = 18.5314;
-              hLng = 73.8446;
-            } else if (h.name.toLowerCase().includes('shivajinagar')) {
-              hLat = 18.5314;
-              hLng = 73.8446;
-            } else if (h.name.toLowerCase().includes('aundh')) {
-              hLat = 18.5580;
-              hLng = 73.8070;
-            } else if (h.name.toLowerCase().includes('baner')) {
-              hLat = 18.5596;
-              hLng = 73.7799;
-            }
 
-            const R = 6371;
-            const dLat = ((hLat - currentLat) * Math.PI) / 180;
-            const dLon = ((hLng - currentLng) * Math.PI) / 180;
-            const a =
-              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos((currentLat * Math.PI) / 180) *
-                Math.cos((hLat * Math.PI) / 180) *
-                Math.sin(dLon / 2) *
-                Math.sin(dLon / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            const dist = Math.round(R * c * 10) / 10;
-            return { ...h, distanceKm: Math.max(0.4, dist) };
-          });
-          setApiHospitals(calculated);
-        }
+        const hospitals = Array.isArray(data?.hospitals)
+          ? data.hospitals.map(normalizeHospital)
+          : [];
+
+        setApiHospitals(hospitals);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!isMounted) return;
-        setApiHospitals(mockHospitals);
+        console.error('Hospital search failed:', error);
+        setApiHospitals([]);
       })
       .finally(() => {
         if (isMounted) setIsLoading(false);
@@ -178,49 +197,31 @@ function HospitalsContent() {
 
   // Fully Interconnected Results Filtering
   const filteredHospitals = useMemo(() => {
-    const q = filters.searchQuery.replace(/['"]/g, '').trim().toLowerCase();
+    const hospitals = [...apiHospitals].sort((a, b) => {
+      if (filters.sortBy === 'distance') return (a.distanceKm ?? 0) - (b.distanceKm ?? 0);
+      if (filters.sortBy === 'rating') return (b.rating ?? 0) - (a.rating ?? 0);
+      if (filters.sortBy === 'name') return a.name.localeCompare(b.name);
+      return (a.distanceKm ?? 0) - (b.distanceKm ?? 0);
+    });
 
-    return apiHospitals
-      .filter((h) => {
-        // Keyword Match Check
-        const matchName = q ? h.name.toLowerCase().includes(q) : false;
-        const matchAddress = q ? (h.address.toLowerCase().includes(q) || h.city.toLowerCase().includes(q)) : false;
-        const matchPincode = q && h.pincode ? h.pincode.includes(q) : false;
-        const matchSpec = q ? h.specializations.some((s) => s.toLowerCase().includes(q)) : false;
-        const matchDoctor = q && (h as any).doctors ? (h as any).doctors.some((d: any) => d.name?.toLowerCase().includes(q)) : false;
+    return hospitals.filter((h) => {
+      if (filters.hospitalType === 'registered' && !h.registered) return false;
+      if (filters.hospitalType === 'external' && h.registered) return false;
 
-        const isKeywordMatch = matchName || matchAddress || matchPincode || matchSpec || matchDoctor;
+      if (filters.specialization) {
+        const match = h.specializations.some((s) =>
+          s.toLowerCase().includes(filters.specialization.toLowerCase())
+        );
+        if (!match) return false;
+      }
 
-        if (q && !isKeywordMatch) return false;
-
-        // Radius filter: apply radius constraint unless explicit keyword search is active
-        if (!q && h.distanceKm > filters.radiusKm) return false;
-
-        // Registration type filter
-        if (filters.hospitalType === 'registered' && !h.registered) return false;
-        if (filters.hospitalType === 'external' && h.registered) return false;
-
-        // Specialization filter
-        if (filters.specialization) {
-          const specMatch = h.specializations.some(
-            (s) => s.toLowerCase() === filters.specialization.toLowerCase()
-          );
-          if (!specMatch) return false;
-        }
-
-        return true;
-      })
-      .sort((a, b) => {
-        if (filters.sortBy === 'distance') return a.distanceKm - b.distanceKm;
-        if (filters.sortBy === 'rating') return (b.rating || 0) - (a.rating || 0);
-        if (filters.sortBy === 'name') return a.name.localeCompare(b.name);
-        return 0;
-      });
-  }, [apiHospitals, filters]);
+      return true;
+    });
+  }, [apiHospitals, filters.hospitalType, filters.sortBy, filters.specialization]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-      
+
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-teal-900 via-teal-800 to-slate-900 rounded-3xl p-8 text-white shadow-xl space-y-4">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-xs font-semibold backdrop-blur-md">
@@ -257,7 +258,7 @@ function HospitalsContent() {
 
       {/* Controls Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
+
         {/* Left Control Sidebar */}
         <div className="lg:col-span-4 space-y-6">
           <LocationSelector
