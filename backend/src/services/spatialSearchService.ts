@@ -114,14 +114,106 @@ function calculateHaversineDistance(
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) *
+    Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Math.round(R * c * 10) / 10;
 }
 
 export class SpatialSearchService {
+  static async findHospitalById(id: string): Promise<any | null> {
+    const registered = await prisma.hospital.findUnique({
+      where: { id },
+      include: {
+        doctors: {
+          include: {
+            user: {
+              select: { name: true },
+            },
+            department: {
+              select: { name: true },
+            },
+          },
+        },
+        departments: true,
+      },
+    });
+
+    if (registered) {
+      const doctors = registered.doctors.map((doctor) => ({
+        id: doctor.id,
+        name: doctor.user?.name || 'Medical Specialist',
+        specialization: doctor.specialization,
+        qualification: doctor.qualification || 'Medical Consult',
+        department: doctor.department?.name || 'General Medicine',
+        experienceYears: 8,
+        availableDays: ['Mon', 'Tue', 'Wed'],
+        nextSlot: 'Today 03:00 PM',
+        image: 'https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&w=400&q=80',
+      }));
+
+      const departments = registered.departments.map((dept) => ({
+        id: dept.id,
+        name: dept.name,
+        description: dept.description || 'Patient care and specialty services.',
+        doctorCount: doctors.filter((doc) => doc.department === dept.name).length || 1,
+      }));
+
+      return {
+        id: registered.id,
+        name: registered.name,
+        address: registered.address,
+        city: registered.city,
+        state: registered.state,
+        pincode: registered.pincode,
+        phone: registered.phone,
+        email: registered.email,
+        description: registered.description || 'This facility provides multi-specialty care and patient-focused medical services.',
+        distanceKm: 0,
+        registered: true,
+        bookingAvailable: true,
+        image: 'https://images.unsplash.com/photo-1587351021759-3e566b6af7cc?auto=format&fit=crop&w=800&q=80',
+        specializations: doctors.length > 0 ? Array.from(new Set(doctors.map((doc) => doc.specialization).filter(Boolean))) : ['General Medicine'],
+        rating: 4.7,
+        reviewCount: 180,
+        facilities: ['24/7 Emergency Care', 'Advanced Diagnostics', 'Pharmacy', 'ICU'],
+        doctors,
+        departments,
+      };
+    }
+
+    const external = await prisma.externalHospital.findUnique({
+      where: { id },
+    });
+
+    if (external) {
+      return {
+        id: external.id,
+        name: external.name,
+        address: external.address,
+        city: external.city,
+        state: external.state,
+        pincode: external.pincode,
+        phone: external.phone,
+        email: external.email,
+        description: `${external.name} is a public healthcare facility providing essential clinical services to the local community.`,
+        distanceKm: 0,
+        registered: false,
+        bookingAvailable: false,
+        image: 'https://images.unsplash.com/photo-1586773860418-d37222d8fce3?auto=format&fit=crop&w=800&q=80',
+        specializations: external.specializations?.length ? external.specializations : ['General Medicine'],
+        rating: 4.2,
+        reviewCount: 120,
+        facilities: ['Emergency Ward', 'Outpatient Department', 'Diagnostic Services'],
+        source: external.source || 'Government Hospital Directory',
+        sourceId: external.source_id || external.id,
+      };
+    }
+
+    return null;
+  }
+
   static async searchHospitals(params: LocationSearchParams): Promise<SearchResultItem[]> {
     const {
       latitude,

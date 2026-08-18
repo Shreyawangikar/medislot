@@ -51,14 +51,24 @@ export class BookingController {
 
   static async getDoctorBookedSlots(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const { doctorId } = req.params;
-      const { date } = req.query;
+      const doctorId = typeof req.params.doctorId === 'string'
+        ? req.params.doctorId
+        : Array.isArray(req.params.doctorId) && typeof req.params.doctorId[0] === 'string'
+          ? req.params.doctorId[0]
+          : undefined;
 
-      if (!date) {
-        return res.status(400).json({ error: 'Date query parameter (YYYY-MM-DD) is required.' });
+      const rawDate = req.query.date;
+      const date = typeof rawDate === 'string'
+        ? rawDate
+        : Array.isArray(rawDate) && typeof rawDate[0] === 'string'
+          ? rawDate[0]
+          : undefined;
+
+      if (!doctorId || !date) {
+        return res.status(400).json({ error: 'Doctor ID and date query parameter (YYYY-MM-DD) are required.' });
       }
 
-      const bookedSlots = await BookingService.getDoctorBookedSlots(doctorId, date as string);
+      const bookedSlots = await BookingService.getDoctorBookedSlots(doctorId as string, date as string);
       return res.status(200).json({ doctorId, date, bookedSlots });
     } catch (error) {
       next(error);
@@ -80,12 +90,17 @@ export class BookingController {
 
   static async cancelBooking(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params;
-      if (!req.user?.userId) {
-        return res.status(401).json({ error: 'Unauthenticated.' });
+      const id = typeof req.params.id === 'string'
+        ? req.params.id
+        : Array.isArray(req.params.id) && typeof req.params.id[0] === 'string'
+          ? req.params.id[0]
+          : undefined;
+
+      if (!req.user?.userId || !id) {
+        return res.status(401).json({ error: 'Unauthenticated or invalid appointment id.' });
       }
 
-      const result = await BookingService.cancelAppointment(id, req.user.userId);
+      const result = await BookingService.cancelAppointment(id as string, req.user.userId);
       return res.status(200).json(result);
     } catch (error) {
       next(error);

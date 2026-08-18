@@ -29,4 +29,28 @@ export class SpatialController {
       next(error);
     }
   }
+
+  static async getHospitalById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const id = typeof req.params.id === 'string'
+        ? req.params.id
+        : Array.isArray(req.params.id) && typeof req.params.id[0] === 'string'
+          ? req.params.id[0]
+          : undefined;
+
+      if (!id) {
+        return res.status(400).json({ error: 'Hospital id is required.' });
+      }
+
+      const hospital = await SpatialSearchService.findHospitalById(id as string);
+
+      if (!hospital) {
+        return res.status(404).json({ error: 'Hospital not found' });
+      }
+
+      return res.status(200).json(hospital);
+    } catch (error) {
+      next(error);
+    }
+  }
 }
